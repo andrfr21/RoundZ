@@ -57,6 +57,22 @@ export default {
           border: "hsl(var(--sidebar-border))",
           ring: "hsl(var(--sidebar-ring))",
         },
+        video: {
+          border: "hsl(var(--video-border))",
+          shadow: "hsl(var(--video-shadow))",
+        },
+        glow: {
+          primary: "hsl(var(--glow-primary))",
+        },
+        phase: {
+          fit: "hsl(var(--phase-fit))",
+          tech: "hsl(var(--phase-tech))",
+          brain: "hsl(var(--phase-brain))",
+        },
+        chat: {
+          ai: "hsl(var(--chat-bubble-ai))",
+          user: "hsl(var(--chat-bubble-user))",
+        },
       },
       borderRadius: {
         lg: "var(--radius)",
@@ -65,25 +81,44 @@ export default {
       },
       keyframes: {
         "accordion-down": {
-          from: {
-            height: "0",
-          },
-          to: {
-            height: "var(--radix-accordion-content-height)",
-          },
+          from: { height: "0" },
+          to: { height: "var(--radix-accordion-content-height)" },
         },
         "accordion-up": {
-          from: {
-            height: "var(--radix-accordion-content-height)",
+          from: { height: "var(--radix-accordion-content-height)" },
+          to: { height: "0" },
+        },
+        "pulse-glow": {
+          "0%, 100%": { 
+            opacity: "0.6",
+            transform: "scale(1)",
           },
-          to: {
-            height: "0",
+          "50%": { 
+            opacity: "1",
+            transform: "scale(1.05)",
+          },
+        },
+        "float": {
+          "0%, 100%": { transform: "translateY(0px)" },
+          "50%": { transform: "translateY(-10px)" },
+        },
+        "ripple": {
+          "0%": { 
+            transform: "scale(1)",
+            opacity: "1",
+          },
+          "100%": { 
+            transform: "scale(1.5)",
+            opacity: "0",
           },
         },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
         "accordion-up": "accordion-up 0.2s ease-out",
+        "pulse-glow": "pulse-glow 2s ease-in-out infinite",
+        "float": "float 3s ease-in-out infinite",
+        "ripple": "ripple 2s ease-out infinite",
       },
     },
   },
