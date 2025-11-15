@@ -17,77 +17,96 @@ export type VapiConfig = {
 
 // Vapi Assistant configurations for each phase
 const getAssistantConfig = (phase: ConversationPhase) => {
-  const baseConfig = {
-    model: {
-      provider: "openai",
-      model: "gpt-4",
-      temperature: 0.7,
-    },
-    voice: {
-      provider: "11labs",
-      voiceId: "pNInz6obpgDQGcFmaJgB", // Adam - professional voice
-    },
-    transcriber: {
-      provider: "deepgram",
-      model: "nova-2",
-      language: "en-US",
-    },
-  };
-
   const phaseConfigs = {
     FIT: {
-      ...baseConfig,
-      firstMessage: "Hello! I'm excited to chat with you today. Let's start with some questions about your background and what motivates you. Can you tell me a bit about yourself and why you're interested in this position?",
-      systemPrompt: `You are a professional HR interviewer conducting a cultural fit assessment. 
-      
-Your goals:
-- Understand the candidate's background and experience
-- Assess their motivation and values
-- Determine cultural fit with the company
-- Be warm, professional, and encouraging
-
-Ask follow-up questions based on their answers. Keep questions conversational and natural.
-After 3-4 meaningful exchanges, you can indicate readiness to move to the technical phase.`,
+      transcriber: {
+        provider: "deepgram",
+        model: "nova-2",
+        language: "en-US",
+      },
+      model: {
+        provider: "openai",
+        model: "gpt-3.5-turbo",
+        messages: [
+          {
+            role: "system",
+            content: `You are a professional HR interviewer conducting a cultural fit assessment. 
+Ask questions about the candidate's background and motivation.
+Keep it conversational and natural.`
+          }
+        ]
+      },
+      voice: {
+        provider: "11labs",
+        voiceId: "pNInz6obpgDQGcFmaJgB",
+      },
+      firstMessage: "Hello! I'm excited to chat with you today. Can you tell me a bit about yourself?",
     },
     TECH: {
-      ...baseConfig,
-      firstMessage: "Great! Now let's move into the technical portion. I'll show you some code examples, and we can discuss your approach to solving technical problems. Take a look at the SQL query on screen - can you walk me through what it does and if you see any potential issues?",
-      systemPrompt: `You are a technical interviewer assessing a candidate's programming skills.
-
-Your goals:
-- Evaluate their technical knowledge
-- Assess problem-solving approach
-- Test code review skills
-- Understand their thought process
-
-Reference the code examples shown on screen (SQL and Python).
-Ask them to explain the code, identify issues, or suggest improvements.
-After 3-4 technical questions, you can move to the brainteaser phase.`,
+      transcriber: {
+        provider: "deepgram",
+        model: "nova-2",
+        language: "en-US",
+      },
+      model: {
+        provider: "openai",
+        model: "gpt-3.5-turbo",
+        messages: [
+          {
+            role: "system",
+            content: `You are a technical interviewer. The candidate can see SQL and Python code on screen. Ask them to explain the code and identify any issues.`
+          }
+        ]
+      },
+      voice: {
+        provider: "11labs",
+        voiceId: "pNInz6obpgDQGcFmaJgB",
+      },
+      firstMessage: "Great! Now let's look at the code on your screen. Can you walk me through the SQL query?",
     },
     BRAINTEASER: {
-      ...baseConfig,
-      firstMessage: "Excellent work so far! For our final section, I have a logic puzzle for you. Take your time and think through it out loud - I want to understand your reasoning process. You see three doors in front of you, each with a guardian. One door leads to treasure, the others to danger. What's your approach to finding the treasure?",
-      systemPrompt: `You are interviewing a candidate with a classic logic puzzle.
-
-The puzzle: Three doors (A, B, C). One has treasure, two have danger.
-- Door A's guardian says: "I always tell the truth"
-- Door B's guardian says: "I always tell lies"  
-- Door C's guardian says: "I sometimes lie"
-You can ask ONE question to ONE guardian.
-
-Your goals:
-- Let the candidate think out loud
-- Guide them if they're stuck (subtle hints only)
-- Assess their logical reasoning
-- Evaluate how they approach problems
-
-After they solve it or make a good attempt, conclude the interview.`,
+      transcriber: {
+        provider: "deepgram",
+        model: "nova-2",
+        language: "en-US",
+      },
+      model: {
+        provider: "openai",
+        model: "gpt-3.5-turbo",
+        messages: [
+          {
+            role: "system",
+            content: `You are interviewing with a logic puzzle. Three doors - A always tells truth, B always lies, C sometimes lies. One door has treasure. Guide them through the puzzle.`
+          }
+        ]
+      },
+      voice: {
+        provider: "11labs",
+        voiceId: "pNInz6obpgDQGcFmaJgB",
+      },
+      firstMessage: "Excellent! Now for a logic puzzle. You see three doors on screen. One has treasure. What's your approach?",
     },
     DONE: {
-      ...baseConfig,
-      firstMessage: "Thank you so much for your time today! We've completed all sections of the interview. You'll hear back from our team soon. Do you have any questions for me?",
-      systemPrompt: `The interview is complete. Be warm and professional. 
-Answer any questions the candidate has briefly, then wish them well.`,
+      transcriber: {
+        provider: "deepgram",
+        model: "nova-2",
+        language: "en-US",
+      },
+      model: {
+        provider: "openai",
+        model: "gpt-3.5-turbo",
+        messages: [
+          {
+            role: "system",
+            content: `The interview is complete. Thank the candidate warmly.`
+          }
+        ]
+      },
+      voice: {
+        provider: "11labs",
+        voiceId: "pNInz6obpgDQGcFmaJgB",
+      },
+      firstMessage: "Thank you for your time today! You'll hear back from our team soon.",
     },
   };
 
@@ -101,6 +120,7 @@ export function useVapi(config: VapiConfig, phase: ConversationPhase) {
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [volumeLevel, setVolumeLevel] = useState(0);
+  const [currentPhase, setCurrentPhase] = useState<ConversationPhase>(phase);
 
   const vapiRef = useRef<any>(null);
 
@@ -218,6 +238,31 @@ export function useVapi(config: VapiConfig, phase: ConversationPhase) {
       vapiRef.current.setMuted(muted);
     }
   }, []);
+
+  // Handle phase transitions without restarting call
+  useEffect(() => {
+    if (phase !== currentPhase && isCallActive && vapiRef.current) {
+      console.log(`📍 Phase transition: ${currentPhase} → ${phase}`);
+      
+      // Get the transition message for the new phase
+      const phaseConfig = getAssistantConfig(phase);
+      
+      // Send system message to transition the conversation
+      vapiRef.current.send({
+        type: 'add-message',
+        message: {
+          role: 'system',
+          content: `PHASE TRANSITION: The interview is now moving to the ${phase} phase. 
+          
+${phaseConfig.model.messages[0].content}
+
+Start this phase by saying: "${phaseConfig.firstMessage}"`
+        }
+      });
+      
+      setCurrentPhase(phase);
+    }
+  }, [phase, currentPhase, isCallActive]);
 
   return {
     isConnected,

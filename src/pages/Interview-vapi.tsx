@@ -1,19 +1,13 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
-import { ArrowRight, Mic, MicOff, Phone, PhoneOff, CheckCircle2, AlertCircle, Video, Download } from "lucide-react";
+import { ArrowRight, Mic, MicOff, Phone, PhoneOff, CheckCircle2, AlertCircle } from "lucide-react";
 import { useParams } from "react-router-dom";
 import { useVapi, type ConversationPhase, type TranscriptEntry } from "@/hooks/useVapi";
-import { transcriptService } from "@/services/transcriptService";
 
 const Interview = () => {
   const { token } = useParams<{ token: string }>();
   const [phase, setPhase] = useState<ConversationPhase>("FIT");
   const [isMuted, setIsMuted] = useState(false);
-  const [videoStream, setVideoStream] = useState<MediaStream | null>(null);
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const [startTime] = useState<Date>(new Date());
-  const [isSendingScores, setIsSendingScores] = useState(false);
-  const [scoringComplete, setScoringComplete] = useState(false);
 
   // Vapi configuration
   const vapiConfig = {
@@ -43,119 +37,6 @@ const Interview = () => {
     }
   }, [isConnected, isCallActive, startCall]);
 
-  // Initialize candidate video stream
-  useEffect(() => {
-    const initVideo = async () => {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ 
-          video: { 
-            width: { ideal: 320 },
-            height: { ideal: 240 },
-            facingMode: 'user'
-          },
-          audio: false // Audio is handled by Vapi
-        });
-        setVideoStream(stream);
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-        }
-      } catch (err) {
-        console.log('Camera access denied or not available:', err);
-        // Not critical, continue without video
-      }
-    };
-
-    initVideo();
-
-    return () => {
-      // Cleanup video stream on unmount
-      if (videoStream) {
-        videoStream.getTracks().forEach(track => track.stop());
-      }
-    };
-  }, []);
-
-  // Update video ref when stream changes
-  useEffect(() => {
-    if (videoRef.current && videoStream) {
-      videoRef.current.srcObject = videoStream;
-    }
-  }, [videoStream]);
-
-  // Auto-save transcript periodically
-  useEffect(() => {
-    if (transcript.length > 0 && token) {
-      // Sauvegarde locale automatique toutes les 30 secondes
-      const saveInterval = setInterval(() => {
-        transcriptService.saveLocally(token, transcript);
-        console.log('💾 Auto-save transcript:', transcript.length, 'messages');
-      }, 30000); // 30 secondes
-
-      return () => clearInterval(saveInterval);
-    }
-  }, [transcript, token]);
-
-  // Send for scoring when interview is complete
-  const handleSendForScoring = async () => {
-    if (!token || transcript.length === 0) return;
-
-    setIsSendingScores(true);
-
-    try {
-      // 1. Calculer la durée
-      const duration = Math.floor((new Date().getTime() - startTime.getTime()) / 1000);
-
-      // 2. Préparer la requête
-      const scoringRequest = {
-        interviewId: token,
-        transcript: transcript,
-        metadata: {
-          candidateName: 'Candidat', // TODO: Récupérer le vrai nom
-          duration: duration,
-          completedPhases: ['FIT', 'TECH', 'BRAINTEASER'],
-        },
-      };
-
-      // 3. Sauvegarder localement d'abord
-      transcriptService.saveLocally(token, transcript);
-
-      // 4. Envoyer pour notation
-      console.log('📤 Envoi du transcript pour notation...');
-      console.log('Transcript complet:', transcript.length, 'messages');
-      console.log('Durée:', duration, 'secondes');
-
-      // TODO: Décommenter quand votre API de notation est prête
-      /*
-      const scores = await transcriptService.sendForScoring(scoringRequest);
-      console.log('✅ Scores reçus:', scores);
-      */
-
-      // Pour l'instant, simulation
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      console.log('✅ Transcript envoyé avec succès!');
-      console.log('📋 Contenu:', transcriptService.formatTranscript(transcript));
-
-      setScoringComplete(true);
-    } catch (error) {
-      console.error('❌ Erreur lors de l\'envoi:', error);
-      alert('Erreur lors de l\'envoi du transcript. Vérifiez la console.');
-    } finally {
-      setIsSendingScores(false);
-    }
-  };
-
-  // Auto-send for scoring when reaching DONE phase
-  useEffect(() => {
-    if (phase === 'DONE' && transcript.length > 0 && !scoringComplete && !isSendingScores) {
-      // Attendre 3 secondes avant d'envoyer automatiquement
-      const timer = setTimeout(() => {
-        handleSendForScoring();
-      }, 3000);
-
-      return () => clearTimeout(timer);
-    }
-  }, [phase, transcript.length, scoringComplete, isSendingScores]);
-
   // Handle phase transitions
   const handleNextPhase = () => {
     const phaseOrder: ConversationPhase[] = ["FIT", "TECH", "BRAINTEASER", "DONE"];
@@ -164,8 +45,17 @@ const Interview = () => {
     if (currentIndex < phaseOrder.length - 1) {
       const nextPhase = phaseOrder[currentIndex + 1];
       
-      // Update phase (this will trigger useEffect in useVapi to send transition message)
+      // Stop current call
+      stopCall();
+      
       setPhase(nextPhase);
+      
+      // Start new call with new phase configuration
+      setTimeout(() => {
+        if (nextPhase !== 'DONE') {
+          startCall();
+        }
+      }, 1000);
     }
   };
 
@@ -335,16 +225,16 @@ const Interview = () => {
                   </div>
                   
                   <div className="bg-slate-950 p-4 font-mono text-sm overflow-x-auto">
-                    <pre className="text-slate-200 whitespace-pre">
-{`SELECT u.name, 
-       COUNT(o.id) AS order_count
-FROM users u
-LEFT JOIN orders o 
-  ON u.id = o.user_id
-WHERE o.created_at >= '2024-01-01'
-GROUP BY u.id, u.name
-HAVING COUNT(o.id) > 5
-ORDER BY order_count DESC;`}
+                    <pre className="text-slate-200">
+<span className="text-purple-400">SELECT</span> u.name, 
+       <span className="text-blue-400">COUNT</span>(o.id) <span className="text-purple-400">AS</span> order_count
+<span className="text-purple-400">FROM</span> users u
+<span className="text-purple-400">LEFT JOIN</span> orders o 
+  <span className="text-purple-400">ON</span> u.id = o.user_id
+<span className="text-purple-400">WHERE</span> o.created_at {`>=`} <span className="text-green-400">'2024-01-01'</span>
+<span className="text-purple-400">GROUP BY</span> u.id, u.name
+<span className="text-purple-400">HAVING</span> <span className="text-blue-400">COUNT</span>(o.id) {`>`} <span className="text-orange-400">5</span>
+<span className="text-purple-400">ORDER BY</span> order_count <span className="text-purple-400">DESC</span>;
                     </pre>
                   </div>
                 </div>
@@ -361,18 +251,18 @@ ORDER BY order_count DESC;`}
                   </div>
                   
                   <div className="bg-slate-950 p-4 font-mono text-sm overflow-x-auto">
-                    <pre className="text-slate-200 whitespace-pre">
-{`def find_duplicates(arr):
-    seen = set()
+                    <pre className="text-slate-200">
+<span className="text-purple-400">def</span> <span className="text-blue-400">find_duplicates</span>(arr):
+    seen = <span className="text-blue-400">set</span>()
     duplicates = []
     
-    for num in arr:
-        if num in seen:
+    <span className="text-purple-400">for</span> num <span className="text-purple-400">in</span> arr:
+        <span className="text-purple-400">if</span> num <span className="text-purple-400">in</span> seen:
             duplicates.append(num)
-        else:
+        <span className="text-purple-400">else</span>:
             seen.add(num)
     
-    return duplicates`}
+    <span className="text-purple-400">return</span> duplicates
                     </pre>
                   </div>
                 </div>
@@ -438,58 +328,6 @@ ORDER BY order_count DESC;`}
                 </p>
               </div>
 
-              {/* Scoring Status */}
-              <div className="p-4 bg-card border border-border rounded-lg">
-                {isSendingScores ? (
-                  <div className="flex items-center justify-center gap-3 text-primary">
-                    <div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-                    <span>Envoi du transcript pour notation...</span>
-                  </div>
-                ) : scoringComplete ? (
-                  <div className="flex items-center justify-center gap-2 text-green-500">
-                    <CheckCircle2 className="w-5 h-5" />
-                    <span>Transcript envoyé avec succès!</span>
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    <p className="text-sm text-muted-foreground">
-                      L'interview sera automatiquement envoyée pour notation dans quelques secondes...
-                    </p>
-                    <Button 
-                      onClick={handleSendForScoring}
-                      variant="outline"
-                      size="sm"
-                      className="gap-2"
-                    >
-                      <ArrowRight className="w-4 h-4" />
-                      Envoyer maintenant
-                    </Button>
-                  </div>
-                )}
-              </div>
-
-              {/* Transcript Actions */}
-              <div className="flex items-center justify-center gap-3">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => transcriptService.exportAsText(transcript, `interview-${token}.txt`)}
-                  className="gap-2"
-                >
-                  <Download className="w-4 h-4" />
-                  Télécharger (.txt)
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => transcriptService.exportAsJSON(transcript, `interview-${token}.json`)}
-                  className="gap-2"
-                >
-                  <Download className="w-4 h-4" />
-                  Télécharger (.json)
-                </Button>
-              </div>
-
               {/* Summary Stats */}
               <div className="grid grid-cols-3 gap-4 pt-8 border-t border-border">
                 <div className="space-y-1">
@@ -505,32 +343,39 @@ ORDER BY order_count DESC;`}
                   <div className="text-sm text-muted-foreground">Problem Solving</div>
                 </div>
               </div>
-
-              {/* Stats */}
-              <div className="text-sm text-muted-foreground space-y-1 pt-4 border-t border-border">
-                <p>Messages: {transcript.length}</p>
-                <p>Durée: {Math.floor((new Date().getTime() - startTime.getTime()) / 60000)} minutes</p>
-              </div>
             </div>
           )}
 
         </div>
       </main>
 
-      {/* Candidate Video Preview - Bottom Right */}
-      {videoStream && phase !== "DONE" && (
-        <div className="fixed bottom-24 right-6 w-48 h-36 rounded-lg overflow-hidden border-2 border-primary shadow-2xl bg-black z-50">
-          <video
-            ref={videoRef}
-            autoPlay
-            playsInline
-            muted
-            className="w-full h-full object-cover mirror"
-            style={{ transform: 'scaleX(-1)' }} // Mirror effect for natural view
-          />
-          <div className="absolute top-2 left-2 flex items-center gap-1 bg-black/60 px-2 py-1 rounded text-xs text-white">
-            <Video className="w-3 h-3" />
-            <span>You</span>
+      {/* Transcript Sidebar */}
+      {transcript.length > 0 && phase !== "DONE" && (
+        <div className="fixed right-0 top-16 bottom-20 w-80 bg-card border-l border-border overflow-y-auto">
+          <div className="p-4 border-b border-border sticky top-0 bg-card">
+            <h3 className="font-semibold">Conversation Transcript</h3>
+          </div>
+          <div className="p-4 space-y-4">
+            {transcript.map((entry) => (
+              <div
+                key={entry.id}
+                className={`p-3 rounded-lg ${
+                  entry.speaker === 'assistant'
+                    ? 'bg-primary/10 border border-primary/20'
+                    : 'bg-muted'
+                }`}
+              >
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-xs font-medium">
+                    {entry.speaker === 'assistant' ? '🤖 AI Interviewer' : '👤 You'}
+                  </span>
+                  <span className="text-xs text-muted-foreground">
+                    {entry.timestamp.toLocaleTimeString()}
+                  </span>
+                </div>
+                <p className="text-sm">{entry.text}</p>
+              </div>
+            ))}
           </div>
         </div>
       )}
