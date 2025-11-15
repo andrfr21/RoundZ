@@ -1,28 +1,101 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
-import { ArrowRight, Code2, Brain, CheckCircle2 } from "lucide-react";
+import { ArrowRight, Mic, MicOff, Volume2, VolumeX, CheckCircle2, AlertCircle } from "lucide-react";
 import { useParams } from "react-router-dom";
-
-type Phase = "FIT" | "TECH" | "BRAINTEASER" | "DONE";
+import { useVoiceAI, type ConversationPhase, type TranscriptEntry } from "@/hooks/useVoiceAI";
 
 const Interview = () => {
   const { token } = useParams<{ token: string }>();
-  const [phase, setPhase] = useState<Phase>("FIT");
+  const [phase, setPhase] = useState<ConversationPhase>("FIT");
+  const [microphonePermission, setMicrophonePermission] = useState<'granted' | 'denied' | 'prompt'>('prompt');
 
-  // TODO: Initialize AI voice agent here when component mounts
-  // - Connect to voice service (e.g., Deepgram, PlayHT, ElevenLabs)
-  // - Set up microphone permissions and audio streaming
-  // - Initialize speech-to-text for transcript capture
+  // Voice AI configuration
+  const voiceConfig = {
+    elevenLabsApiKey: import.meta.env.VITE_ELEVENLABS_API_KEY || '',
+    elevenLabsVoiceId: import.meta.env.VITE_ELEVENLABS_VOICE_ID || 'pNInz6obpgDQGcFmaJgB', // Default voice
+    useBrowserSTT: true, // Set to false to use Deepgram
+    deepgramApiKey: import.meta.env.VITE_DEEPGRAM_API_KEY,
+  };
 
+  const {
+    isConnected,
+    isListening,
+    isSpeaking,
+    transcript,
+    currentInterimText,
+    error,
+    speakAI,
+    startListening,
+    stopListening,
+    getPhaseGreeting,
+  } = useVoiceAI(voiceConfig, phase);
+
+  // Request microphone permission on mount
+  useEffect(() => {
+    const requestMicrophonePermission = async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        stream.getTracks().forEach(track => track.stop()); // Stop immediately, we just wanted permission
+        setMicrophonePermission('granted');
+      } catch (err) {
+        console.error('Microphone permission denied:', err);
+        setMicrophonePermission('denied');
+      }
+    };
+
+    requestMicrophonePermission();
+  }, []);
+
+  // Start the interview when voice is connected
+  useEffect(() => {
+    if (isConnected && microphonePermission === 'granted' && transcript.length === 0) {
+      // Greet the candidate and start listening
+      const greeting = getPhaseGreeting();
+      speakAI(greeting);
+      
+      // Start listening after AI finishes speaking (add delay)
+      setTimeout(() => {
+        startListening();
+      }, 3000);
+    }
+  }, [isConnected, microphonePermission]);
+
+  // Handle phase transitions
   const handleNextPhase = () => {
-    const phaseOrder: Phase[] = ["FIT", "TECH", "BRAINTEASER", "DONE"];
+    const phaseOrder: ConversationPhase[] = ["FIT", "TECH", "BRAINTEASER", "DONE"];
     const currentIndex = phaseOrder.indexOf(phase);
+    
     if (currentIndex < phaseOrder.length - 1) {
-      setPhase(phaseOrder[currentIndex + 1]);
-      // TODO: When phase changes, send signal to backend to:
-      // - Update interview phase in database
-      // - Adjust AI interviewer personality/question style
-      // - Log phase transition in transcript
+      const nextPhase = phaseOrder[currentIndex + 1];
+      
+      // Stop listening during transition
+      stopListening();
+      
+      setPhase(nextPhase);
+      
+      // TODO: Send phase transition to backend
+      // await updateInterviewPhase(token, nextPhase);
+      
+      // Announce new phase
+      setTimeout(() => {
+        const greeting = getPhaseGreeting();
+        speakAI(greeting);
+        
+        // Resume listening
+        setTimeout(() => {
+          if (nextPhase !== 'DONE') {
+            startListening();
+          }
+        }, 2000);
+      }, 1000);
+    }
+  };
+
+  const toggleListening = () => {
+    if (isListening) {
+      stopListening();
+    } else {
+      startListening();
     }
   };
 
@@ -67,14 +140,40 @@ const Interview = () => {
             </div>
           </div>
           
-          {/* Phase Indicator */}
-          <div className="flex items-center gap-2">
+          {/* Status Indicators */}
+          <div className="flex items-center gap-4">
+            {/* Connection Status */}
+            <div className="flex items-center gap-2 text-xs">
+              {isConnected ? (
+                <>
+                  <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+                  <span className="text-muted-foreground">Connected</span>
+                </>
+              ) : (
+                <>
+                  <div className="w-2 h-2 rounded-full bg-red-500" />
+                  <span className="text-muted-foreground">Connecting...</span>
+                </>
+              )}
+            </div>
+
+            {/* Phase Indicator */}
             <span className={`text-sm font-medium ${getPhaseColor()}`}>
               {getPhaseTitle()}
             </span>
           </div>
         </div>
       </header>
+
+      {/* Error Banner */}
+      {error && (
+        <div className="bg-red-500/10 border-b border-red-500/20 px-4 py-2">
+          <div className="max-w-7xl mx-auto flex items-center gap-2 text-sm text-red-500">
+            <AlertCircle className="w-4 h-4" />
+            <span>{error}</span>
+          </div>
+        </div>
+      )}
 
       {/* Main Content Area */}
       <main className="flex-1 flex items-center justify-center p-8">
@@ -83,12 +182,16 @@ const Interview = () => {
           {/* FIT Phase */}
           {phase === "FIT" && (
             <div className="space-y-8 text-center">
-              {/* Pulsing Logo */}
+              {/* Pulsing Logo with Speaking Indicator */}
               <div className="flex justify-center">
                 <div className="relative">
-                  <div className="absolute inset-0 rounded-full bg-phase-fit/20 animate-ping" />
-                  <div className="absolute inset-0 rounded-full bg-phase-fit/10 animate-pulse" 
-                       style={{ animationDuration: '2s' }} />
+                  {isSpeaking && (
+                    <>
+                      <div className="absolute inset-0 rounded-full bg-phase-fit/20 animate-ping" />
+                      <div className="absolute inset-0 rounded-full bg-phase-fit/10 animate-pulse" 
+                           style={{ animationDuration: '2s' }} />
+                    </>
+                  )}
                   <div className="relative w-32 h-32 rounded-full bg-gradient-to-br from-phase-fit/30 to-phase-fit/10 border-4 border-phase-fit/40 flex items-center justify-center backdrop-blur-sm">
                     <span className="text-5xl font-bold text-phase-fit">RZ</span>
                   </div>
@@ -102,15 +205,31 @@ const Interview = () => {
                   We're starting with a few questions about your background and motivations. 
                   This helps us understand if our company values align with yours.
                 </p>
+                
+                {/* Status Indicator */}
                 <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground mt-6">
-                  <div className="w-2 h-2 rounded-full bg-phase-fit animate-pulse" />
-                  <span>AI interviewer is listening...</span>
+                  {isSpeaking ? (
+                    <>
+                      <Volume2 className="w-4 h-4 text-phase-fit animate-pulse" />
+                      <span>AI interviewer is speaking...</span>
+                    </>
+                  ) : isListening ? (
+                    <>
+                      <div className="w-2 h-2 rounded-full bg-phase-fit animate-pulse" />
+                      <span>Listening to your response...</span>
+                    </>
+                  ) : (
+                    <span>Ready to begin</span>
+                  )}
                 </div>
-              </div>
 
-              {/* TODO: Voice Activity Indicator */}
-              {/* Add waveform visualization here showing user speech activity */}
-              {/* TODO: Display live transcript at bottom of screen */}
+                {/* Interim Text Display */}
+                {currentInterimText && (
+                  <div className="mt-4 p-4 bg-muted/50 rounded-lg border border-border">
+                    <p className="text-sm text-muted-foreground italic">"{currentInterimText}"</p>
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
@@ -129,7 +248,6 @@ const Interview = () => {
                 
                 {/* SQL Code Board */}
                 <div className="rounded-lg border border-border bg-card overflow-hidden shadow-lg">
-                  {/* Editor Header */}
                   <div className="bg-muted/50 px-4 py-2 flex items-center gap-2 border-b border-border">
                     <div className="flex gap-1.5">
                       <div className="w-3 h-3 rounded-full bg-red-500" />
@@ -139,7 +257,6 @@ const Interview = () => {
                     <span className="text-sm text-muted-foreground ml-2">query.sql</span>
                   </div>
                   
-                  {/* Code Content */}
                   <div className="bg-slate-950 p-4 font-mono text-sm overflow-x-auto">
                     <pre className="text-slate-200">
 <span className="text-purple-400">SELECT</span> u.name, 
@@ -157,7 +274,6 @@ const Interview = () => {
 
                 {/* Python Code Board */}
                 <div className="rounded-lg border border-border bg-card overflow-hidden shadow-lg">
-                  {/* Editor Header */}
                   <div className="bg-muted/50 px-4 py-2 flex items-center gap-2 border-b border-border">
                     <div className="flex gap-1.5">
                       <div className="w-3 h-3 rounded-full bg-red-500" />
@@ -167,7 +283,6 @@ const Interview = () => {
                     <span className="text-sm text-muted-foreground ml-2">algorithm.py</span>
                   </div>
                   
-                  {/* Code Content */}
                   <div className="bg-slate-950 p-4 font-mono text-sm overflow-x-auto">
                     <pre className="text-slate-200">
 <span className="text-purple-400">def</span> <span className="text-blue-400">find_duplicates</span>(arr):
@@ -186,9 +301,12 @@ const Interview = () => {
                 </div>
               </div>
 
-              {/* TODO: Code highlighting based on voice conversation */}
-              {/* - Highlight specific lines when AI asks about them */}
-              {/* - Allow candidate to reference line numbers verbally */}
+              {/* Interim Text Display */}
+              {currentInterimText && (
+                <div className="mt-4 p-4 bg-muted/50 rounded-lg border border-border max-w-2xl mx-auto">
+                  <p className="text-sm text-muted-foreground italic">"{currentInterimText}"</p>
+                </div>
+              )}
             </div>
           )}
 
@@ -205,50 +323,23 @@ const Interview = () => {
               {/* Puzzle Cards */}
               <div className="grid md:grid-cols-3 gap-6 max-w-4xl mx-auto">
                 
-                {/* Door A */}
-                <div className="group relative">
-                  <div className="absolute inset-0 bg-phase-brain/20 rounded-xl blur-xl group-hover:blur-2xl transition-all animate-pulse" 
-                       style={{ animationDuration: '3s' }} />
-                  <div className="relative bg-card border-2 border-phase-brain/40 rounded-xl p-8 text-center space-y-4 hover:border-phase-brain/60 transition-colors cursor-pointer">
-                    <div className="w-16 h-16 mx-auto rounded-full bg-phase-brain/10 flex items-center justify-center">
-                      <Brain className="w-8 h-8 text-phase-brain" />
+                {['A', 'B', 'C'].map((door, idx) => (
+                  <div key={door} className="group relative">
+                    <div className="absolute inset-0 bg-phase-brain/20 rounded-xl blur-xl group-hover:blur-2xl transition-all animate-pulse" 
+                         style={{ animationDuration: `${3 + idx * 0.5}s`, animationDelay: `${idx * 0.5}s` }} />
+                    <div className="relative bg-card border-2 border-phase-brain/40 rounded-xl p-8 text-center space-y-4 hover:border-phase-brain/60 transition-colors">
+                      <div className="w-16 h-16 mx-auto rounded-full bg-phase-brain/10 flex items-center justify-center">
+                        <span className="text-2xl font-bold text-phase-brain">{door}</span>
+                      </div>
+                      <h3 className="text-2xl font-bold">Door {door}</h3>
+                      <p className="text-sm text-muted-foreground">
+                        {door === 'A' && '"I always tell the truth"'}
+                        {door === 'B' && '"I always tell lies"'}
+                        {door === 'C' && '"I sometimes lie"'}
+                      </p>
                     </div>
-                    <h3 className="text-2xl font-bold">Door A</h3>
-                    <p className="text-sm text-muted-foreground">
-                      "I always tell the truth"
-                    </p>
                   </div>
-                </div>
-
-                {/* Door B */}
-                <div className="group relative">
-                  <div className="absolute inset-0 bg-phase-brain/20 rounded-xl blur-xl group-hover:blur-2xl transition-all animate-pulse" 
-                       style={{ animationDuration: '3.5s', animationDelay: '0.5s' }} />
-                  <div className="relative bg-card border-2 border-phase-brain/40 rounded-xl p-8 text-center space-y-4 hover:border-phase-brain/60 transition-colors cursor-pointer">
-                    <div className="w-16 h-16 mx-auto rounded-full bg-phase-brain/10 flex items-center justify-center">
-                      <Brain className="w-8 h-8 text-phase-brain" />
-                    </div>
-                    <h3 className="text-2xl font-bold">Door B</h3>
-                    <p className="text-sm text-muted-foreground">
-                      "I always tell lies"
-                    </p>
-                  </div>
-                </div>
-
-                {/* Door C */}
-                <div className="group relative">
-                  <div className="absolute inset-0 bg-phase-brain/20 rounded-xl blur-xl group-hover:blur-2xl transition-all animate-pulse" 
-                       style={{ animationDuration: '4s', animationDelay: '1s' }} />
-                  <div className="relative bg-card border-2 border-phase-brain/40 rounded-xl p-8 text-center space-y-4 hover:border-phase-brain/60 transition-colors cursor-pointer">
-                    <div className="w-16 h-16 mx-auto rounded-full bg-phase-brain/10 flex items-center justify-center">
-                      <Brain className="w-8 h-8 text-phase-brain" />
-                    </div>
-                    <h3 className="text-2xl font-bold">Door C</h3>
-                    <p className="text-sm text-muted-foreground">
-                      "I sometimes lie"
-                    </p>
-                  </div>
-                </div>
+                ))}
               </div>
 
               <div className="text-center text-sm text-muted-foreground max-w-2xl mx-auto">
@@ -258,9 +349,12 @@ const Interview = () => {
                 </p>
               </div>
 
-              {/* TODO: Track candidate's reasoning process */}
-              {/* - Capture key decision points in their verbal explanation */}
-              {/* - Score logical consistency and creativity */}
+              {/* Interim Text Display */}
+              {currentInterimText && (
+                <div className="mt-4 p-4 bg-muted/50 rounded-lg border border-border max-w-2xl mx-auto">
+                  <p className="text-sm text-muted-foreground italic">"{currentInterimText}"</p>
+                </div>
+              )}
             </div>
           )}
 
@@ -296,38 +390,87 @@ const Interview = () => {
                   <div className="text-sm text-muted-foreground">Problem Solving</div>
                 </div>
               </div>
-
-              {/* TODO: Show processing status */}
-              {/* - Display transcript analysis progress */}
-              {/* - Show when scores are calculated and ready */}
-              {/* - Provide option to review transcript */}
             </div>
           )}
 
         </div>
       </main>
 
+      {/* Transcript Sidebar */}
+      {transcript.length > 0 && phase !== "DONE" && (
+        <div className="fixed right-0 top-16 bottom-20 w-80 bg-card border-l border-border overflow-y-auto">
+          <div className="p-4 border-b border-border sticky top-0 bg-card">
+            <h3 className="font-semibold">Conversation Transcript</h3>
+          </div>
+          <div className="p-4 space-y-4">
+            {transcript.map((entry) => (
+              <div
+                key={entry.id}
+                className={`p-3 rounded-lg ${
+                  entry.speaker === 'ai'
+                    ? 'bg-primary/10 border border-primary/20'
+                    : 'bg-muted'
+                }`}
+              >
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-xs font-medium">
+                    {entry.speaker === 'ai' ? '🤖 AI Interviewer' : '👤 You'}
+                  </span>
+                  <span className="text-xs text-muted-foreground">
+                    {entry.timestamp.toLocaleTimeString()}
+                  </span>
+                </div>
+                <p className="text-sm">{entry.text}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Footer Controls */}
       <footer className="border-t border-border bg-card/50 backdrop-blur-sm">
         <div className="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
           
-          {/* TODO: Microphone controls will go here */}
+          {/* Microphone Controls */}
           <div className="flex items-center gap-4">
-            <div className="text-sm text-muted-foreground">
-              {/* Microphone mute/unmute button */}
-              {/* Volume level indicator */}
-              {/* Connection status */}
-            </div>
+            <Button
+              variant={isListening ? "destructive" : "outline"}
+              size="sm"
+              onClick={toggleListening}
+              disabled={!isConnected || isSpeaking || phase === "DONE"}
+              className="gap-2"
+            >
+              {isListening ? (
+                <>
+                  <MicOff className="w-4 h-4" />
+                  Mute
+                </>
+              ) : (
+                <>
+                  <Mic className="w-4 h-4" />
+                  Unmute
+                </>
+              )}
+            </Button>
+
+            {/* Audio Indicator */}
+            {isSpeaking && (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Volume2 className="w-4 h-4 animate-pulse" />
+                <span>AI speaking...</span>
+              </div>
+            )}
           </div>
 
-          {/* Phase Navigation (temporary for dev) */}
+          {/* Phase Navigation (Dev/Testing) */}
           {phase !== "DONE" && (
             <Button 
               onClick={handleNextPhase}
               className="gap-2"
               variant="default"
+              disabled={!isConnected}
             >
-              Next Phase
+              Next Phase (Dev)
               <ArrowRight className="w-4 h-4" />
             </Button>
           )}
@@ -342,11 +485,6 @@ const Interview = () => {
           )}
         </div>
       </footer>
-
-      {/* TODO: Transcript Panel (collapsible side panel or bottom drawer) */}
-      {/* - Show real-time transcript of conversation */}
-      {/* - Highlight AI questions vs candidate responses */}
-      {/* - Allow scrolling through conversation history */}
     </div>
   );
 };
